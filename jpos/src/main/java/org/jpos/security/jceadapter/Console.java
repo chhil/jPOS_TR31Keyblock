@@ -27,6 +27,7 @@ import org.jpos.util.Logger;
 import org.jpos.util.SimpleLogListener;
 
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 
 /**
@@ -51,121 +52,226 @@ public class Console {
 
     public void exec(PrintStream outPS,PrintStream errPS,String[] args)
     {
+        // Default to the base module
         JCESecurityModule sm = new JCESecurityModule();
+        boolean useTr31 = false;
+
         Logger logger = new Logger();
         logger.addListener(new SimpleLogListener(outPS));
-        sm.setLogger(logger, "jce-security-module");
         Properties cfgProps = new Properties();
         SimpleConfiguration cfg = new SimpleConfiguration(cfgProps);
         String commandName = null;
         String[] commandParams = new String[10];                 // 10 is Maximum number of paramters for a command
-        outPS.println("Welcome to JCE Security Module console commander!");
+
         if (args.length == 0) {
-            outPS.println("Usage: Console [-options] command [commandparameters...]");
-            outPS.println("\nwhere options include:");
-            outPS.println("    -lmk <filename>");
-            outPS.println("                  to specify the Local Master Keys file");
-            outPS.println("    -rebuildlmk   to rebuild new Local Master Keys");
-            outPS.println("                  WARNING: old Local Master Keys gets overwritten");
-            outPS.println("    -jce <provider classname>");
-            outPS.println("                  to specify a JavaTM Cryptography Extension 1.2.1 provider");
-            outPS.println("\nWhere command include: ");
-            outPS.println("    GC <keyLength>");
-            outPS.println("                  to generate a clear key component.");
-            outPS.println("    FK <keyLength> <keyType> <component1> <component2> <component3>");
-            outPS.println("                  to form a key from three clear components.");
-            outPS.println("                  and returns the key encrypted under LMK");
-            outPS.println("                  Odd parity is be forced before encryption under LMK");
-            outPS.println("    CK <keyLength> <keyType> <KEYunderLMK>");
-            outPS.println("                  to generate a key check value for a key encrypted under LMK.");
-            outPS.println("    IK <keyLength> <keyType> <KEYunderKEK> ");
-            outPS.println("       <kekLength> <kekType> <KEKunderLMK> <KEKcheckValue>");
-            outPS.println("                  to import a key from encryption under KEK (eg. ZMK,TMK) to encryption under LMK");
-            outPS.println("                  Odd parity is be forced before encryption under LMK");
-            outPS.println("    KE <keyLength> <keyType> <KEYunderLMK> <KEYcheckValue> ");
-            outPS.println("       <kekLength> <kekType> <KEKunderLMK> <KEKcheckValue> ");
-            outPS.println("                  to translate (export) a key from encryption under LMK");
-            outPS.println("                  to encryption under KEK (eg. ZMK,TMK)");
+            printUsage(outPS);
+            return;
         }
-        else {
-            int argsCounter = 0;
-            for (int j = 0; j < 10; j++) {
-                if (argsCounter < args.length &&
-                        args[argsCounter].toLowerCase().compareTo("-lmk") == 0
-                ) {
-                    argsCounter++;
+
+        // --- Argument Parsing ---
+        int argsCounter = 0;
+        while (argsCounter < args.length) {
+            String arg = args[argsCounter].toLowerCase();
+            if (arg.equals("-lmk")) {
+                argsCounter++;
+                if (argsCounter < args.length) {
                     cfgProps.setProperty("lmk", args[argsCounter++]);
                 }
-                if (argsCounter < args.length &&
-                        args[argsCounter].toLowerCase().compareTo("-jce") == 0
-                ) {
-                    argsCounter++;
+            } else if (arg.equals("-jce")) {
+                argsCounter++;
+                if (argsCounter < args.length) {
                     cfgProps.setProperty("provider", args[argsCounter++]);
                 }
-                if (argsCounter < args.length &&
-                        args[argsCounter].toLowerCase().compareTo("-rebuildlmk") == 0
-                ) {
-                    argsCounter++;
-                    cfgProps.setProperty("rebuildlmk", "true");
-                }
+            } else if (arg.equals("-rebuildlmk")) {
+                argsCounter++;
+                cfgProps.setProperty("rebuildlmk", "true");
+            } else if (arg.equals("-tr31")) { // New flag for TR-31 module
+                argsCounter++;
+                useTr31 = true;
+            } else {
+                // First non-option argument is the command
+                break;
             }
-            if (argsCounter < args.length) {
-                commandName = args[argsCounter++];
-                int i = 0;
-                while (argsCounter < args.length) {
-                    commandParams[i++] = args[argsCounter++];
-                }
+        }
+
+        if (argsCounter < args.length) {
+            commandName = args[argsCounter++];
+            int i = 0;
+            while (argsCounter < args.length) {
+                commandParams[i++] = args[argsCounter++];
             }
-            // Configure JCE Security Module
+        }
+
+        if (commandName == null && !cfgProps.containsKey("rebuildlmk")) {
+            errPS.println("No command specified.");
+            printUsage(errPS);
+            return;
+        }
+
+        outPS.println("Welcome to JCE Security Module console commander!");
+        if (useTr31) {
+            outPS.println("Mode: TR-31 Key Management Enabled");
+            sm = new JSecurityModuleTR31();
+        } else {
+            outPS.println("Mode: Legacy LMK Variant Scheme");
+        }
+
+        sm.setLogger(logger, "jce-security-module-console");
+
+        // Configure JCE Security Module
+        try {
+            sm.setConfiguration(cfg);
+        } catch (ConfigurationException e) {
+            e.printStackTrace(errPS);
+            return;
+        }
+
+        // Execute Command
+        if (commandName != null) {
             try {
-                sm.setConfiguration(cfg);
-            } catch (ConfigurationException e) {
-                e.printStackTrace(errPS);
-                return;
-            }
-            // Execute Command
-            if (commandName != null) {
-                try {
+                if (commandName.equalsIgnoreCase("GC")) {
                     short keyLength = (short)Integer.parseInt(commandParams[0]);
-                    if (commandName.toUpperCase().compareTo("GC") == 0) {
-                        String clearKeyComponenetHexString = sm.generateClearKeyComponent(keyLength);
-                    }
-                    else if (commandName.toUpperCase().compareTo("FK") == 0) {
-                        SecureDESKey KEYunderLMK = sm.formKEYfromThreeClearComponents(keyLength,
-                                commandParams[1].toUpperCase(), commandParams[2], commandParams[3], commandParams[4]);
-                    }
-                    else if (commandName.toUpperCase().compareTo("CK") == 0) {
-                        byte[] keyCheckValue = sm.generateKeyCheckValue(
-                                new SecureDESKey(keyLength,commandParams[1].toUpperCase(), commandParams[2],""));
-                    }
-                    else if (commandName.toUpperCase().compareTo("IK") == 0) {
-                        SecureDESKey KEKunderLMK = new SecureDESKey((short)Integer.parseInt(commandParams[4]),
-                                commandParams[5].toUpperCase(), commandParams[6], commandParams[7]);
-                        sm.importKey(keyLength, commandParams[1].toUpperCase(),
-                                ISOUtil.hex2byte(commandParams[2]), KEKunderLMK, true);
-                    }
-                    else if (commandName.toUpperCase().compareTo("KE") == 0) {
-                        SecureDESKey KEKunderLMK = new SecureDESKey((short)Integer.parseInt(commandParams[4]),
-                                commandParams[5].toUpperCase(), commandParams[6], commandParams[7]);
-                        SecureDESKey KEYunderLMK = new SecureDESKey(keyLength, commandParams[1].toUpperCase(),
-                                commandParams[2], commandParams[3] );
-                        sm.exportKey(KEYunderLMK, KEKunderLMK);
-                    }
-                    else {
-                        System.err.println("Unknown command: " + commandName);
-                    }
-                } catch (SMException e) {
-                    e.printStackTrace(errPS);
-                } catch (java.lang.NumberFormatException e) {
-                    errPS.println("Invalid KeyLength");
+                    String clearKeyComponent = sm.generateClearKeyComponent(keyLength);
+                    outPS.println("Generated Clear Key Component: " + clearKeyComponent);
                 }
-            }
-            else {
-                errPS.println("No command specified");
+                else if (commandName.equalsIgnoreCase("FK")) {
+                    short keyLength = (short)Integer.parseInt(commandParams[0]);
+                    String keyType = commandParams[1].toUpperCase();
+                    SecureDESKey keyUnderLMK = sm.formKEYfromThreeClearComponents(keyLength,
+                                                                                  keyType, commandParams[2], commandParams[3], commandParams[4]);
+                    outPS.println("Formed Key under LMK:");
+                    outPS.println("  Key Type: " + keyUnderLMK.getKeyType());
+                    outPS.println("  Key Check Value: " + ISOUtil.hexString(keyUnderLMK.getKeyCheckValue()));
+                    String keyData = useTr31 ? new String(keyUnderLMK.getKeyBytes(), StandardCharsets.US_ASCII)
+                            : ISOUtil.hexString(keyUnderLMK.getKeyBytes());
+                    outPS.println("  Key Data (under LMK): " + keyData);
+                }
+                else if (commandName.equalsIgnoreCase("CK")) {
+                    short keyLength = (short)Integer.parseInt(commandParams[0]);
+                    String keyType = commandParams[1].toUpperCase();
+                    String keyUnderLmkData = commandParams[2];
+                    byte[] keyBytes = useTr31 ? keyUnderLmkData.getBytes(StandardCharsets.US_ASCII)
+                            : ISOUtil.hex2byte(keyUnderLmkData);
+
+                    byte[] keyCheckValue = sm.generateKeyCheckValue(
+                            new SecureDESKey(keyLength, keyType, keyBytes, new byte[0])); // KCV not needed for this op
+                    outPS.println("Generated Key Check Value: " + ISOUtil.hexString(keyCheckValue));
+                }
+                else if (commandName.equalsIgnoreCase("IK")) { // Legacy Import
+                    if (useTr31) {
+                        errPS.println("Command IK is for legacy mode. Use IKT for TR-31 mode.");
+                        return;
+                    }
+                    short keyLength = (short)Integer.parseInt(commandParams[0]);
+                    SecureDESKey kekUnderLMK = new SecureDESKey((short)Integer.parseInt(commandParams[3]),
+                                                                commandParams[4].toUpperCase(), commandParams[5], commandParams[6]);
+                    SecureDESKey importedKey = sm.importKey(keyLength, commandParams[1].toUpperCase(),
+                                                            ISOUtil.hex2byte(commandParams[2]), kekUnderLMK, true);
+                    outPS.println("Imported Key under LMK (Legacy): " + ISOUtil.hexString(importedKey.getKeyBytes()));
+                    outPS.println("  KCV: " + ISOUtil.hexString(importedKey.getKeyCheckValue()));
+                }
+                else if (commandName.equalsIgnoreCase("IKT")) { // TR-31 Import
+                    if (!useTr31) {
+                        errPS.println("Command IKT requires -tr31 flag.");
+                        return;
+                    }
+                    short keyLength = (short)Integer.parseInt(commandParams[0]);
+                    String keyType = commandParams[1].toUpperCase();
+                    String keyBlock = commandParams[2];
+                    short kekLength = (short)Integer.parseInt(commandParams[3]);
+                    String kekType = commandParams[4].toUpperCase();
+                    String kekUnderLmkBlock = commandParams[5];
+                    String kekKcvHexString = commandParams[6];
+
+                    // CORRECTED: Convert both key data and KCV to byte arrays
+                    byte[] kekBytes = kekUnderLmkBlock.getBytes(StandardCharsets.US_ASCII);
+                    byte[] kekKcvBytes = ISOUtil.hex2byte(kekKcvHexString);
+                    SecureDESKey kek = new SecureDESKey(kekLength, kekType, kekBytes, kekKcvBytes);
+
+                    SecureDESKey importedKey = sm.importKey(keyLength, keyType,
+                                                            keyBlock.getBytes(StandardCharsets.US_ASCII), kek, true);
+
+                    outPS.println("Successfully imported TR-31 Key Block.");
+                    outPS.println("  Imported Key under LMK: " + new String(importedKey.getKeyBytes(), StandardCharsets.US_ASCII));
+                    outPS.println("  KCV: " + ISOUtil.hexString(importedKey.getKeyCheckValue()));
+                }
+                else if (commandName.equalsIgnoreCase("KE")) { // Legacy Export
+                    if (useTr31) {
+                        errPS.println("Command KE is for legacy mode. Use KET for TR-31 mode.");
+                        return;
+                    }
+                    short keyLength = (short)Integer.parseInt(commandParams[0]);
+                    SecureDESKey kekUnderLMK = new SecureDESKey((short)Integer.parseInt(commandParams[4]),
+                                                                commandParams[5].toUpperCase(), commandParams[6], commandParams[7]);
+                    SecureDESKey keyUnderLMK = new SecureDESKey(keyLength, commandParams[1].toUpperCase(),
+                                                                commandParams[2], commandParams[3]);
+                    byte[] exportedKey = sm.exportKey(keyUnderLMK, kekUnderLMK);
+                    outPS.println("Exported Key under KEK (Legacy): " + ISOUtil.hexString(exportedKey));
+                }
+                else if (commandName.equalsIgnoreCase("KET")) { // TR-31 Export
+                    if (!useTr31) {
+                        errPS.println("Command KET requires -tr31 flag.");
+                        return;
+                    }
+                    short keyLength = (short)Integer.parseInt(commandParams[0]);
+                    String keyType = commandParams[1].toUpperCase();
+                    String keyUnderLmkBlock = commandParams[2];
+                    String keyKcvHexString = commandParams[3];
+
+                    short kekLength = (short)Integer.parseInt(commandParams[4]);
+                    String kekType = commandParams[5].toUpperCase();
+                    String kekUnderLmkBlock = commandParams[6];
+                    String kekKcvHexString = commandParams[7];
+
+                    // CORRECTED: Convert both key data and KCVs to byte arrays for both keys
+                    byte[] keyBytes = keyUnderLmkBlock.getBytes(StandardCharsets.US_ASCII);
+                    byte[] keyKcvBytes = ISOUtil.hex2byte(keyKcvHexString);
+                    SecureDESKey key = new SecureDESKey(keyLength, keyType, keyBytes, keyKcvBytes);
+
+                    byte[] kekBytes = kekUnderLmkBlock.getBytes(StandardCharsets.US_ASCII);
+                    byte[] kekKcvBytes = ISOUtil.hex2byte(kekKcvHexString);
+                    SecureDESKey kek = new SecureDESKey(kekLength, kekType, kekBytes, kekKcvBytes);
+
+                    byte[] exportedKeyBlock = sm.exportKey(key, kek);
+                    outPS.println("Exported TR-31 Key Block: " + new String(exportedKeyBlock, StandardCharsets.US_ASCII));
+                }
+                else {
+                    errPS.println("Unknown command: " + commandName);
+                    printUsage(errPS);
+                }
+            } catch (SMException e) {
+                e.printStackTrace(errPS);
+            } catch (ArrayIndexOutOfBoundsException | NumberFormatException e) {
+                errPS.println("Invalid or missing parameters for command: " + commandName);
+                printUsage(errPS);
             }
         }
     }
+
+    private void printUsage(PrintStream ps) {
+        ps.println("\nUsage: Console [-options] command [commandparameters...]");
+        ps.println("\nOptions include:");
+        ps.println("    -lmk <filename>        Specify the Local Master Keys file");
+        ps.println("    -rebuildlmk            Rebuild new Local Master Keys (WARNING: overwrites old file)");
+        ps.println("    -jce <provider class>  Specify a JCE provider");
+        ps.println("    -tr31                  Enable TR-31 key block mode (uses JSecurityModuleTR31)");
+        ps.println("\nCommands include:");
+        ps.println("  Legacy Mode Commands:");
+        ps.println("    GC <keyLength>");
+        ps.println("          Generate a clear key component.");
+        ps.println("    FK <keyLength> <keyType> <comp1> [<comp2>] [<comp3>]");
+        ps.println("          Form a key from components and encrypt under LMK.");
+        ps.println("    CK <keyLength> <keyType> <KEYunderLMK_Hex>");
+        ps.println("          Generate a key check value for a key encrypted under LMK.");
+        ps.println("    IK <keyLen> <keyType> <KEYunderKEK_Hex> <kekLen> <kekType> <KEKunderLMK_Hex> <KEK_KCV>");
+        ps.println("          Import a key from KEK to LMK encryption.");
+        ps.println("    KE <keyLen> <keyType> <KEYunderLMK_Hex> <KEY_KCV> <kekLen> <kekType> <KEKunderLMK_Hex> <KEK_KCV>");
+        ps.println("          Export a key from LMK to KEK encryption.");
+        ps.println("\n  TR-31 Mode Commands (-tr31 flag required):");
+        ps.println("    FK, GC, CK work as above but will produce/consume TR-31 blocks for KEYunderLMK.");
+        ps.println("    IKT <keyLen> <keyType> <TR31_KeyBlock> <kekLen> <kekType> <KEKunderLMK_Block> <KEK_KCV_Hex>");
+        ps.println("          Import a key from a TR-31 key block.");
+        ps.println("    KET <keyLen> <keyType> <KEYunderLMK_Block> <KEY_KCV_Hex> <kekLen> <kekType> <KEKunderLMK_Block> <KEK_KCV_Hex>");
+        ps.println("          Export a key from LMK into a new TR-31 key block.");
+    }
 }
-
-
-

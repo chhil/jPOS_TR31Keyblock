@@ -415,4 +415,22 @@ public class JCEHandler {
             return true;
         }
     }
+
+    public Key generateAESKey(short keyLength) throws JCEHandlerException {
+        try {
+            KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+            keyGen.init(keyLength);
+            return keyGen.generateKey();
+        } catch (Exception e) {
+            throw new JCEHandlerException("Error generating AES key", e);
+        }
+    }
+
+    public Key formKey(String algorithm, byte[] keyMaterial) throws JCEHandlerException {
+        try {
+            return new SecretKeySpec(keyMaterial, algorithm);
+        } catch (Exception e) {
+            throw new JCEHandlerException("Error forming " + algorithm + " key from bytes", e);
+        }
+    }
 }

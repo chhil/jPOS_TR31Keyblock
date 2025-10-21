@@ -19,6 +19,10 @@ module org.jpos.jpos {
     requires com.fasterxml.jackson.datatype.jsr310;
     requires com.fasterxml.jackson.dataformat.xml;
     requires org.bouncycastle.provider;
+    requires org.keyblock.keyblock;
+
+    requires at.favre.lib.bytes;
+
 
     exports org.jpos.iso.packager;
     exports org.jpos.iso.validator;

@@ -196,6 +196,12 @@ public interface SMAdapter<T> {
      */
     String TYPE_RSA_PK = "RSA_PK";
 
+    String TYPE_KBPK_TDES= "KBPK_TDES";
+
+    String TYPE_KBPK_AES= "KBPK_AES";
+
+
+
     /**
      * PIN Block Format adopted by ANSI (ANSI X9.8) and is one of
      * two formats supported by the ISO (ISO 95641 - format 0).

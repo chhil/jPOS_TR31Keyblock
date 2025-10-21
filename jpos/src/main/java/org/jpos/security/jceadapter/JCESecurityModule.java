@@ -30,6 +30,7 @@ import org.jpos.util.LogEvent;
 import org.jpos.util.Logger;
 import org.jpos.util.SimpleMsg;
 
+
 import javax.crypto.SecretKey;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -80,8 +81,9 @@ public class JCESecurityModule extends BaseSMAdapter<SecureDESKey> {
     /**
      * NUmber of LMK pairs
      */
-    private final static int LMK_PAIRS_NO = 0xe;
+    private final static int LMK_PAIRS_NO = 0x11;
 
+    private static final short AES_KBPK_LENGTH = 256; //
     /**
      * LMK variants appled to first byte of LMK pair
      */
@@ -1925,27 +1927,40 @@ public class JCESecurityModule extends BaseSMAdapter<SecureDESKey> {
     }
 
     /**
-     * Generates new LMK keys
+     * Generates new LMK keys, handling AES KBPK as a special case.
      * @exception SMException
      */
-    private void generateLMK () throws SMException {
+    private void generateLMK() throws SMException {
         lmks.clear();
         try {
-            for (int i = 0; i <= LMK_PAIRS_NO; i++){
-              SecretKey lmkKey = (SecretKey)jceHandler.generateDESKey(LMK_KEY_LENGTH);
-              spreadLMKVariants(lmkKey.getEncoded(), i);
+            for (int i = 0; i <= LMK_PAIRS_NO; i++) {
+                if (i == 0x11) { // TR-31 AES KBPK at index 17
+                    SecretKey lmkKey = (SecretKey) jceHandler.generateAESKey(AES_KBPK_LENGTH);
+                    lmks.put(i, lmkKey); // Store raw key
+                } else { // All other keys are TDES
+                    SecretKey lmkKey = (SecretKey) jceHandler.generateDESKey(LMK_KEY_LENGTH);
+                    if (i == 0x10) { // TR-31 TDES KBPK at index 16
+                        lmks.put(i, lmkKey); // Store raw key
+                    } else { // Legacy LMKs
+                        spreadLMKVariants(lmkKey.getEncoded(), i);
+                    }
+                }
             }
         } catch (JCEHandlerException e) {
-            throw  new SMException("Can't generate Local Master Keys", e);
+            throw new SMException("Can't generate Local Master Keys", e);
         }
     }
 
+
+
+
     /**
-     * reads (loads) LMK's from lmkFile
-     * @param lmkFile
-     * @exception SMException
+     * ******************************************************************************************
+     * *** MODIFICATION 5: Rewritten readLMK method.                                          ***
+     * *** This version reads KBPKs for TR-31 as raw keys and legacy LMKs with variants.    ***
+     * ******************************************************************************************
      */
-    private void readLMK (File lmkFile) throws SMException {
+    private void readLMK(File lmkFile) throws SMException {
         lmks.clear();
         try {
             Properties lmkProps = new Properties();
@@ -1962,13 +1977,27 @@ public class JCESecurityModule extends BaseSMAdapter<SecureDESKey> {
             }
             byte[] lmkData;
             for (int i = 0; i <= LMK_PAIRS_NO; i++) {
-                lmkData = ISOUtil.hex2byte(lmkProps.getProperty(
-                        String.format("LMK0x%1$02x", i)).substring(0, SMAdapter.LENGTH_DES3_2KEY/4));
-                spreadLMKVariants(lmkData, i);
+                String lmkHex = lmkProps.getProperty(String.format("LMK0x%1$02x", i));
+                if (lmkHex == null) {
+                    throw new SMException("Missing LMK entry in file: LMK0x" + Integer.toHexString(i));
+                }
+
+                if (i == 0x11) { // TR-31 AES KBPK
+                    lmkData = ISOUtil.hex2byte(lmkHex);
+                    SecretKey lmkKey = (SecretKey) jceHandler.formKey("AES", lmkData);
+                    lmks.put(i, lmkKey);
+                } else if (i == 0x10) { // TR-31 TDES KBPK
+                    lmkData = ISOUtil.hex2byte(lmkHex);
+                    SecretKey lmkKey = (SecretKey) jceHandler.formDESKey(LMK_KEY_LENGTH, lmkData);
+                    lmks.put(i, lmkKey);
+                } else { // Legacy LMK with variants
+                    lmkData = ISOUtil.hex2byte(lmkHex.substring(0, LMK_KEY_LENGTH / 4));
+                    spreadLMKVariants(lmkData, i);
+                }
             }
         } catch (Exception e) {
-            throw  new SMException("Can't read Local Master Keys from file: " +
-                    lmkFile, e);
+            throw new SMException("Can't read Local Master Keys from file: " +
+                                          lmkFile, e);
         }
     }
 
@@ -2002,7 +2031,7 @@ public class JCESecurityModule extends BaseSMAdapter<SecureDESKey> {
      * @return the lmks secret key for the givin key index
      * @throws SMException
      */
-    private SecretKey getLMK (Integer lmkIndex) throws SMException {
+    protected SecretKey getLMK (Integer lmkIndex) throws SMException {
         SecretKey lmk = lmks.get(lmkIndex);
         if (lmk==null)
             throw  new SMException(String.format("Invalid key code: LMK0x%1$04x", lmkIndex));
@@ -2015,7 +2044,10 @@ public class JCESecurityModule extends BaseSMAdapter<SecureDESKey> {
     /**
      * The clear Local Master Keys
      */
-    private final Map<Integer,SecretKey> lmks = new TreeMap<>();
+    protected final Map<Integer,SecretKey> lmks = new TreeMap<>();
+
+    /** The clear Base Local Master Keys, used for persistence. */
+    protected final Map<Integer, SecretKey> baseLmks = new TreeMap<>();
     /**
      * A index for the LMK used to encrypt the PINs
      */
@@ -2024,7 +2056,7 @@ public class JCESecurityModule extends BaseSMAdapter<SecureDESKey> {
      * The key length (in bits) of the Local Master Keys.
      * JCESecurityModule uses Triple DES Local Master Keys
      */
-    private static final short LMK_KEY_LENGTH = LENGTH_DES3_2KEY;
+    protected static final short LMK_KEY_LENGTH = LENGTH_DES3_2KEY;
     /**
      * The minimum length of the PIN
      */

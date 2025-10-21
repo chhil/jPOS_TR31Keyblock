@@ -12,6 +12,7 @@ extraJavaModuleInfo {
     automaticModule ('org.apache-extras.beanshell:bsh', 'bsh')
     automaticModule ('com.sleepycat:je', 'com.sleepycat.je')
     automaticModule ('jdbm:jdbm', 'org.jdbm')
+    automaticModule ('at.favre.lib:bytes', 'at.favre.lib.bytes')
 }
 
 dependencies { 
@@ -34,6 +35,7 @@ dependencies {
     implementation libs.jdbm
     implementation libs.sleepycatje
     implementation libs.hdrhistogram
+    implementation group: 'at.favre.lib', name: 'bytes', version: '1.5.0'
 
     testImplementation libs.commonslang3
     testImplementation libs.hamcrest
@@ -46,6 +48,11 @@ dependencies {
     }
     testImplementation libs.mockitojupiter
 
+    implementation project(':tr31keyblock')
+
+        
+
+
     //  JSONPackager on hold
     //    compile (libraries.jsonsimple) {
     //        exclude(module: 'junit')
@@ -54,6 +61,9 @@ dependencies {
     // Integrated OSGI framework
     // compile 'org.apache.felix:org.apache.felix.framework:5.0.0'
 }
+
+
+
 
 def q2ArchiveJarName="${project.name}-${project.version}-q2.jar"
 def jposCopySpec = copySpec {
@@ -135,12 +145,16 @@ task q2jar (type: Jar) {
     dependsOn jar
     archiveClassifier.set('q2')
     from sourceSets.main.output.classesDirs, sourceSets.main.output.resourcesDir
-    manifest {
-        def manifestClasspath = configurations.runtimeClasspath.collect { "lib/" + it.getName() }.join(' ') 
-        attributes 'Implementation-Title': 'jPOS', 
-                   'Implementation-Version': project.version,
-                   'Main-Class': 'org.jpos.q2.Q2',
-                   'Class-Path': manifestClasspath
+
+    // Defer the classpath calculation until execution time
+    doFirst {
+        def manifestClasspath = configurations.runtimeClasspath.collect { "lib/" + it.getName() }.join(' ')
+        manifest {
+            attributes 'Implementation-Title': 'jPOS',
+                    'Implementation-Version': project.version,
+                    'Main-Class': 'org.jpos.q2.Q2',
+                    'Class-Path': manifestClasspath
+        }
     }
 }
 
