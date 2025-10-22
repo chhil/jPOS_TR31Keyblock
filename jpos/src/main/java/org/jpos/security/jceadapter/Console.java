@@ -357,5 +357,11 @@ public class Console {
         ps.println("          Import a key from a TR-31 key block.");
         ps.println("    KET <keyLen> <keyType> <KEYunderLMK_Block> <KEY_KCV_Hex> <kekLen> <kekType> <KEKunderLMK_Block> <KEK_KCV_Hex>");
         ps.println("          Export a key from LMK into a new TR-31 key block.");
+        ps.println("\n  Interoperability Commands:");
+        ps.println("    CVT <direction> <keyLen> <keyType> <sourceKeyData>");
+        ps.println("          Convert a key between variant and TR-31 formats.");
+        ps.println("          <direction> can be 'variant-to-tr31' or 'tr31-to-variant'.");
+        ps.println("          <sourceKeyData> is a hex string for variant, or a TR-31 block (in quotes) for TR-31.");
+
     }
 }
